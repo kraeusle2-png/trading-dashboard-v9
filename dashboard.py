@@ -5,15 +5,17 @@ from datetime import datetime
 import pytz
 
 # --- SETUP ---
-st.set_page_config(page_title="Sniper V10.7.1", page_icon="🎯", layout="centered")
+st.set_page_config(page_title="Sniper V10.8", page_icon="🎯", layout="centered")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
 
 USER_NAME = "Kraus Markus"
 
+# Speicher für Signale (Asset -> {Zeit, Kurs})
 if 'signal_log' not in st.session_state:
     st.session_state.signal_log = {}
 
+# --- ASSETS & WATCHLISTS ---
 ASSET_NAMES = {
     "SAP.DE": "SAP", "MUV2.DE": "Münchener Rück", "ALV.DE": "Allianz", "SIE.DE": "Siemens", "ENR.DE": "Siemens Energy",
     "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "AMZN": "Amazon", "GOOGL": "Alphabet",
@@ -27,9 +29,7 @@ WATCHLISTS = {
 }
 INDEX_TICKERS = {"DAX 🇩🇪": "^GDAXI", "S&P 500 🇺🇸": "^GSPC", "Nasdaq 🚀": "^IXIC"}
 
-if 'capital' not in st.session_state: 
-    st.session_state.capital = 3836.29
-
+# --- HILFSFUNKTIONEN ---
 def get_safe_val(dp):
     return float(dp.iloc[0]) if isinstance(dp, pd.Series) else float(dp)
 
@@ -67,14 +67,12 @@ def calc_pro_entry(ticker, vix, idx_p, markt):
     except: return None
 
 # --- UI ---
-st.title("🎯 SNIPER V10.7.1")
+st.title("🎯 SNIPER V10.8")
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    c_in = st.text_input("Kapital (€)", value=str(st.session_state.capital))
-    if st.button("Speichern"): st.session_state.capital = float(c_in)
-    m_sel = st.selectbox("Markt", list(WATCHLISTS.keys()))
-    st.metric("Budget", f"{st.session_state.capital:,.2f} €")
+    m_sel = st.selectbox("Markt wählen", list(WATCHLISTS.keys()))
+    st.divider()
     st.caption(f"Operator: {USER_NAME}")
 
 if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
@@ -119,4 +117,4 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
             st.write(f"{'✅' if ch['VIX'] else '❌'} VIX | {'✅' if ch['RSX'] else '❌'} RSX | {'✅' if ch['SM'] else '❌'} SM | {'✅' if ch['TIME'] else '❌'} Zeit")
 
 st.divider()
-st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME}")
+st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME} | V10.8")
