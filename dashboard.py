@@ -5,13 +5,13 @@ from datetime import datetime
 import pytz
 
 # --- SETUP ---
-st.set_page_config(page_title="Sniper V10.6", page_icon="🎯", layout="centered")
+st.set_page_config(page_title="Sniper V10.7", page_icon="🎯", layout="centered")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
 
 USER_NAME = "Kraus Markus"
 
-# Speicher für Signale (Asset -> Uhrzeit)
+# Speicher für Signale (Asset -> {Zeit, Kurs})
 if 'signal_log' not in st.session_state:
     st.session_state.signal_log = {}
 
@@ -39,11 +39,8 @@ def calc_pro_entry(ticker, vix, idx_p, markt):
         s = yf.download(ticker, period="2d", interval="15m", progress=False)
         if len(s) < 3: return None
         
-        # Historische Daten für SL-Check (Minimum des Tages)
-        day_low = get_safe_val(s['Low'].min())
         p = get_safe_val(s['Close'].iloc[-1])
-        hi = get_safe_val(s['High'].iloc[-1])
-        lo = get_safe_val(s['Low'].iloc[-1])
+        hi, lo = get_safe_val(s['High'].iloc[-1]), get_safe_val(s['Low'].iloc[-1])
         prev_p = get_safe_val(s['Close'].iloc[-2])
         
         checks = {}
@@ -57,21 +54,16 @@ def calc_pro_entry(ticker, vix, idx_p, markt):
         checks['SM'] = sm > 0.72
         if checks['SM']: score += 30
         
-        # Timing Prüfung
-        stunde = now.hour
-        zeit_f = stunde + now.minute / 60.0
+        zeit_f = now.hour + now.minute / 60.0
         if "DAX" in markt:
             checks['TIME'] = (9.25 <= zeit_f <= 11.5) or (15.75 <= zeit_f <= 17.5)
         else:
             checks['TIME'] = (15.75 <= zeit_f <= 21.0)
-            
         if checks['TIME']: score += 20
         
-        entry = hi * 1.001 
-        sl = lo * 0.995
+        entry, sl = hi * 1.001, lo * 0.995
         tp = entry + ((entry - sl) * 2)
         
-        # SL Check Logik: Wenn der aktuelle Kurs oder das Tagestief den SL berührt hat
         sl_hit = "Offen"
         if p <= sl:
             sl_hit = f"ERREICHT ({now.strftime('%H:%M')})"
@@ -83,12 +75,12 @@ def calc_pro_entry(ticker, vix, idx_p, markt):
     except: return None
 
 # --- UI ---
-st.title("🎯 SNIPER V10.6 MONITOR")
+st.title("🎯 SNIPER V10.7 MONITOR")
 
 with st.sidebar:
     st.header("⚙️ Settings")
     c_in = st.text_input("Kapital (€)", value=str(st.session_state.capital))
-    if st.button("Save"): st.session_state.capital = float(c_in)
+    if st.button("Speichern"): st.session_state.capital = float(c_in)
     m_sel = st.selectbox("Markt", list(WATCHLISTS.keys()))
     st.metric("Budget", f"{st.session_state.capital:,.2f} €")
     st.caption(f"Operator: {USER_NAME}")
@@ -103,35 +95,49 @@ if st.button(f"🔍 ANALYSE & MONITORING STARTEN", use_container_width=True):
     for t in WATCHLISTS[m_sel]:
         data = calc_pro_entry(t, v_val, i_perf, m_sel)
         if data:
-            # Signal-Zeit loggen
+            # Signal-Zeit UND Kurs loggen, wenn Score >= 80
             if data['score'] >= 80 and t not in st.session_state.signal_log:
-                st.session_state.signal_log[t] = now.strftime("%H:%M")
+                st.session_state.signal_log[t] = {
+                    "time": now.strftime("%H:%M"),
+                    "price": data['price']
+                }
             res.append(data)
     
     res = sorted(res, key=lambda x: x['score'], reverse=True)
     
     for item in res:
+        # Roter Kasten, wenn SL erreicht
+        border_color = "red" if "ERREICHT" in item['sl_status'] else "normal"
+        
         with st.container(border=True):
             col1, col2 = st.columns([2, 1])
             with col1:
                 st.subheader(ASSET_NAMES.get(item['t'], item['t']))
-                st.write(f"💹 Kurs: {item['price']:.2f} €")
+                st.write(f"💹 **Aktueller Kurs: {item['price']:.2f} €**")
             with col2:
                 st.metric("Score", f"{item['score']}%")
             
             # MONITORING ZEILE
-            sig_time = st.session_state.signal_log.get(item['t'], "Offen")
+            sig_data = st.session_state.signal_log.get(item['t'], None)
+            if sig_data:
+                sig_display = f"{sig_data['time']} Uhr (@ {sig_data['price']:.2f} €)"
+            else:
+                sig_display = "Offen"
             
-            # Anzeige der Uhrzeiten
             m_col1, m_col2 = st.columns(2)
-            m_col1.write(f"🔔 **Signal um:** {sig_time}")
-            m_col2.write(f"🛑 **Stop-Loss:** {item['sl_status']}")
+            m_col1.write(f"🔔 **Signal:** {sig_display}")
             
-            # Checkliste & Trading Plan
+            # SL Status mit Farbe
+            if "ERREICHT" in item['sl_status']:
+                m_col2.markdown(f"🛑 **SL:** <span style='color:red; font-weight:bold;'>{item['sl_status']}</span>", unsafe_allow_html=True)
+            else:
+                m_col2.write(f"🛑 **SL:** {item['sl_status']}")
+            
+            # Trading Plan
+            st.info(f"**Einstieg ab:** {item['entry']:.2f} € | **STOP:** {item['sl']:.2f} € | **ZIEL:** {item['tp']:.2f} €")
+            
             ch = item['checks']
             st.write(f"{'✅' if ch['VIX'] else '❌'} VIX | {'✅' if ch['RSX'] else '❌'} RSX | {'✅' if ch['SM'] else '❌'} SM | {'✅' if ch['TIME'] else '❌'} Zeit")
-            
-            st.info(f"**ENTRY:** {item['entry']:.2f} € | **STOP:** {item['sl']:.2f} € | **TARGET:** {item['tp']:.2f} €")
 
 st.divider()
-st.caption(f"Stand: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME}")
+st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME}")
