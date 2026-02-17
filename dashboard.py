@@ -5,7 +5,7 @@ from datetime import datetime
 import pytz
 
 # --- SETUP ---
-st.set_page_config(page_title="Sniper V10.10", page_icon="🎯", layout="centered")
+st.set_page_config(page_title="Sniper V10.11", page_icon="🎯", layout="centered")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
 
@@ -15,19 +15,12 @@ USER_NAME = "Kraus Markus"
 if 'signal_log' not in st.session_state:
     st.session_state.signal_log = {}
 
-# --- AUTO-CLEANER (Neu in V10.10) ---
-# Bereinigt automatisch alte Text-Einträge, damit nur vollständige Daten (Dicts) bleiben.
-keys_to_delete = []
-for k, v in st.session_state.signal_log.items():
-    if isinstance(v, str):  # Wenn es ein alter Text-Eintrag ist (z.B. "09:30")
-        keys_to_delete.append(k)
-
-# Lösche die alten Einträge
+# --- AUTO-CLEANER ---
+keys_to_delete = [k for k, v in st.session_state.signal_log.items() if isinstance(v, str)]
 for k in keys_to_delete:
     del st.session_state.signal_log[k]
 
-
-# --- ASSETS ---
+# --- ASSETS & WATCHLISTS ---
 ASSET_NAMES = {
     "SAP.DE": "SAP", "MUV2.DE": "Münchener Rück", "ALV.DE": "Allianz", "SIE.DE": "Siemens", "ENR.DE": "Siemens Energy",
     "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "AMZN": "Amazon", "GOOGL": "Alphabet",
@@ -41,7 +34,7 @@ WATCHLISTS = {
 }
 INDEX_TICKERS = {"DAX 🇩🇪": "^GDAXI", "S&P 500 🇺🇸": "^GSPC", "Nasdaq 🚀": "^IXIC"}
 
-# --- HILFSFUNKTIONEN ---
+# --- LOGIK ---
 def get_safe_val(dp):
     return float(dp.iloc[0]) if isinstance(dp, pd.Series) else float(dp)
 
@@ -79,16 +72,14 @@ def calc_pro_entry(ticker, vix, idx_p, markt):
     except: return None
 
 # --- UI ---
-st.title("🎯 SNIPER V10.10")
+st.title("🎯 SNIPER V10.11")
 
 with st.sidebar:
     st.header("⚙️ Settings")
     m_sel = st.selectbox("Markt wählen", list(WATCHLISTS.keys()))
-    
     if st.button("♻️ Reset alle Signale"):
         st.session_state.signal_log = {}
         st.rerun()
-        
     st.divider()
     st.caption(f"Operator: {USER_NAME}")
 
@@ -104,12 +95,17 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
     for t in WATCHLISTS[m_sel]:
         data = calc_pro_entry(t, v_val, i_perf, m_sel)
         if data:
-            # Speichern: Nur wenn noch kein Eintrag existiert (der Cleaner hat alte Strings schon entfernt)
+            # Einstieg loggen (Score >= 80)
             if data['score'] >= 80 and t not in st.session_state.signal_log:
-                st.session_state.signal_log[t] = {
-                    "time": now.strftime("%H:%M"), 
-                    "price": data['price']
-                }
+                st.session_state.signal_log[t] = {"time": now.strftime("%H:%M"), "price": data['price'], "exit_triggered": False}
+            
+            # NEU: Exit-Logik (Wenn Score unter 80 fällt, nachdem ein Signal aktiv war)
+            if t in st.session_state.signal_log and data['score'] < 80:
+                if not st.session_state.signal_log[t].get("exit_triggered"):
+                    st.session_state.signal_log[t]["exit_time"] = now.strftime("%H:%M")
+                    st.session_state.signal_log[t]["exit_price"] = data['price']
+                    st.session_state.signal_log[t]["exit_triggered"] = True
+
             res.append(data)
     
     res = sorted(res, key=lambda x: x['score'], reverse=True)
@@ -119,32 +115,33 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
             col1, col2 = st.columns([2, 1])
             with col1:
                 st.subheader(ASSET_NAMES.get(item['t'], item['t']))
-                st.write(f"💹 **Aktueller Kurs: {item['price']:.2f} €**")
+                st.write(f"💹 **Kurs: {item['price']:.2f} €**")
             with col2:
                 st.metric("Score", f"{item['score']}%")
             
-            # --- ANZEIGE ---
+            # --- ANZEIGE EINSTIEG & VERKAUF ---
             sig_data = st.session_state.signal_log.get(item['t'], None)
             
-            if sig_data:
-                # Da der Auto-Cleaner lief, ist sig_data garantiert ein Dictionary mit Preis!
-                s_time = sig_data.get('time', '--:--')
-                s_price = sig_data.get('price', 0.0)
-                sig_display = f"{s_time} Uhr (@ {s_price:.2f} €)"
-            else:
-                sig_display = "Offen"
-
             m_col1, m_col2 = st.columns(2)
-            m_col1.write(f"🔔 **Signal:** {sig_display}")
             
-            if "ERREICHT" in item['sl_status']:
-                m_col2.markdown(f"🛑 **SL:** <span style='color:red; font-weight:bold;'>{item['sl_status']}</span>", unsafe_allow_html=True)
+            if sig_data:
+                m_col1.write(f"🔔 **Einstieg:** {sig_data['time']} (@ {sig_data['price']:.2f} €)")
+                if sig_data.get("exit_triggered"):
+                    m_col2.markdown(f"⚠️ **Verkauf:** <span style='color:#FFA500; font-weight:bold;'>{sig_data['exit_time']} (@ {sig_data['exit_price']:.2f} €)</span>", unsafe_allow_html=True)
+                else:
+                    m_col2.write("⚠️ **Verkauf:** Halten")
             else:
-                m_col2.write(f"🛑 **SL:** {item['sl_status']}")
+                m_col1.write("🔔 **Einstieg:** Offen")
+                m_col2.write("⚠️ **Verkauf:** -")
+
+            # STOP LOSS STATUS
+            if "ERREICHT" in item['sl_status']:
+                st.error(f"🛑 **STOP LOSS:** {item['sl_status']}")
             
             st.info(f"**Einstieg ab:** {item['entry']:.2f} € | **STOP:** {item['sl']:.2f} € | **ZIEL:** {item['tp']:.2f} €")
+            
             ch = item['checks']
             st.write(f"{'✅' if ch['VIX'] else '❌'} VIX | {'✅' if ch['RSX'] else '❌'} RSX | {'✅' if ch['SM'] else '❌'} SM | {'✅' if ch['TIME'] else '❌'} Zeit")
 
 st.divider()
-st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME} | V10.10 Auto-Clean")
+st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME} | V10.11 Exit-Control")
