@@ -23,7 +23,8 @@ ASSET_NAMES = {
     "^VIX": "VIX Angst-Index"
 }
 
-if 'capital' not in st.session_state: st.session_state.capital = 3836.29
+if 'capital' not in st.session_state: 
+    st.session_state.capital = 3836.29
 
 # --- DATA ENGINE ---
 def get_vix_level():
@@ -60,20 +61,16 @@ def calculate_hps(ticker, current_vix, index_perf):
         stock_perf = ((p_now / p_prev) - 1) * 100
         score = 0
         
-        # 1. VIX-Guard
         vix_ok = current_vix <= 22
         if vix_ok: score += 20
         
-        # 2. Timing (11:30-13:30 CET Pause)
         is_lunch = (now.hour == 11 and now.minute >= 30) or (now.hour == 12) or (now.hour == 13 and now.minute < 30)
         timing_ok = not is_lunch
         if timing_ok: score += 20
         
-        # 3. RSX
         rsx_ok = (stock_perf - index_perf) > 0
         if rsx_ok: score += 30
         
-        # 4. Smart Money Ratio
         sm_ratio = (p_now - d_low) / (d_high - d_low) if d_high != d_low else 0.5
         sm_ok = sm_ratio > 0.7
         if sm_ok: score += 30
@@ -85,7 +82,7 @@ def calculate_hps(ticker, current_vix, index_perf):
 st.title("⚡ MASTER-DASHBOARD 9.0 ULTRA-ELITE")
 
 st.sidebar.header("Kommando-Zentrale")
-input_cap = st.sidebar.text_input("Kapital anpassen", f"{st.session_state.capital}")
+input_cap = st.sidebar.text_input("Kapital anpassen", value=str(st.session_state.capital))
 if st.sidebar.button("Speichern"):
     st.session_state.capital = float(input_cap)
 
@@ -106,7 +103,18 @@ if st.button("DASHBOARD AKTUELL"):
             risk = st.session_state.capital * 0.01
             qty = risk / (price * 0.015) if price > 0 else 0
             
+            # Hier war der Fehler - jetzt sicher verpackt:
             results.append({
                 "Asset": ASSET_NAMES.get(t, t),
                 "HPS-Score": f"{score}%",
-                "Preis
+                "Preis": f"{price:.2f} €",
+                "Stärke": "🔥 Stark" if f.get('RSX') else "❄️ Schwach",
+                "VIX": "✅" if f.get('VIX') else "⚠️",
+                "Timing": "✅" if f.get('Time') else "⏳",
+                "Stück": int(qty)
+            })
+    
+    if results:
+        df = pd.DataFrame(results).sort_values(by="HPS-Score", ascending=False)
+        st.table(df)
+        st.caption(f"Marktdaten: VIX {vix:.2f} | DAX: {idx_p:+.2f}%")
