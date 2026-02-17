@@ -5,7 +5,7 @@ from datetime import datetime
 import pytz
 
 # --- SETUP ---
-st.set_page_config(page_title="Sniper V10.9", page_icon="🎯", layout="centered")
+st.set_page_config(page_title="Sniper V10.10", page_icon="🎯", layout="centered")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
 
@@ -14,6 +14,18 @@ USER_NAME = "Kraus Markus"
 # Speicher initialisieren
 if 'signal_log' not in st.session_state:
     st.session_state.signal_log = {}
+
+# --- AUTO-CLEANER (Neu in V10.10) ---
+# Bereinigt automatisch alte Text-Einträge, damit nur vollständige Daten (Dicts) bleiben.
+keys_to_delete = []
+for k, v in st.session_state.signal_log.items():
+    if isinstance(v, str):  # Wenn es ein alter Text-Eintrag ist (z.B. "09:30")
+        keys_to_delete.append(k)
+
+# Lösche die alten Einträge
+for k in keys_to_delete:
+    del st.session_state.signal_log[k]
+
 
 # --- ASSETS ---
 ASSET_NAMES = {
@@ -67,14 +79,13 @@ def calc_pro_entry(ticker, vix, idx_p, markt):
     except: return None
 
 # --- UI ---
-st.title("🎯 SNIPER V10.9")
+st.title("🎯 SNIPER V10.10")
 
 with st.sidebar:
     st.header("⚙️ Settings")
     m_sel = st.selectbox("Markt wählen", list(WATCHLISTS.keys()))
     
-    # Notfall-Reset Button
-    if st.button("♻️ Speicher bereinigen"):
+    if st.button("♻️ Reset alle Signale"):
         st.session_state.signal_log = {}
         st.rerun()
         
@@ -93,12 +104,12 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
     for t in WATCHLISTS[m_sel]:
         data = calc_pro_entry(t, v_val, i_perf, m_sel)
         if data:
-            # Signal loggen (Neue Struktur: Dict)
-            if data['score'] >= 80:
-                # Nur speichern, wenn noch kein Eintrag da ist oder der alte Eintrag falsch (String) ist
-                current_entry = st.session_state.signal_log.get(t)
-                if current_entry is None or isinstance(current_entry, str):
-                     st.session_state.signal_log[t] = {"time": now.strftime("%H:%M"), "price": data['price']}
+            # Speichern: Nur wenn noch kein Eintrag existiert (der Cleaner hat alte Strings schon entfernt)
+            if data['score'] >= 80 and t not in st.session_state.signal_log:
+                st.session_state.signal_log[t] = {
+                    "time": now.strftime("%H:%M"), 
+                    "price": data['price']
+                }
             res.append(data)
     
     res = sorted(res, key=lambda x: x['score'], reverse=True)
@@ -112,19 +123,16 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
             with col2:
                 st.metric("Score", f"{item['score']}%")
             
-            # --- ROBUSTE ANZEIGE-LOGIK (Fix für AttributeError) ---
+            # --- ANZEIGE ---
             sig_data = st.session_state.signal_log.get(item['t'], None)
             
-            if sig_data is None:
-                sig_display = "Offen"
-            elif isinstance(sig_data, dict):
-                # Neuer, korrekter Datentyp
+            if sig_data:
+                # Da der Auto-Cleaner lief, ist sig_data garantiert ein Dictionary mit Preis!
                 s_time = sig_data.get('time', '--:--')
                 s_price = sig_data.get('price', 0.0)
                 sig_display = f"{s_time} Uhr (@ {s_price:.2f} €)"
             else:
-                # Alter Datentyp (String) aus V10.6 -> Fallback
-                sig_display = f"{sig_data} Uhr (Altdaten)"
+                sig_display = "Offen"
 
             m_col1, m_col2 = st.columns(2)
             m_col1.write(f"🔔 **Signal:** {sig_display}")
@@ -139,4 +147,4 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
             st.write(f"{'✅' if ch['VIX'] else '❌'} VIX | {'✅' if ch['RSX'] else '❌'} RSX | {'✅' if ch['SM'] else '❌'} SM | {'✅' if ch['TIME'] else '❌'} Zeit")
 
 st.divider()
-st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME} | V10.9 Fix")
+st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME} | V10.10 Auto-Clean")
