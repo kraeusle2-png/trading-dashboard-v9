@@ -4,21 +4,23 @@ import yfinance as yf
 from datetime import datetime
 import pytz
 
-# --- CONFIG ---
-st.set_page_config(page_title="Sniper V9.9 Sorted", layout="centered")
+# --- SETUP ---
+st.set_page_config(page_title="Sniper V9.9 Elite", page_icon="🎯", layout="centered")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
+
+# --- DEIN NAME ---
+USER_NAME = "Kraus Markus"
 
 ASSET_NAMES = {
     "SAP.DE": "SAP", "MUV2.DE": "Münchener Rück", "ALV.DE": "Allianz", "SIE.DE": "Siemens", "ENR.DE": "Siemens Energy",
     "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "AMZN": "Amazon", "GOOGL": "Alphabet",
-    "TSLA": "Tesla", "META": "Meta", "AVGO": "Broadcom", "COST": "Costco", "NFLX": "Netflix",
-    "ASML": "ASML", "AMD": "AMD", "V": "Visa"
+    "TSLA": "Tesla", "META": "Meta", "AVGO": "Broadcom", "COST": "Costco", "NFLX": "Netflix"
 }
 WATCHLISTS = {
     "DAX 🇩🇪": ["SAP.DE", "MUV2.DE", "ALV.DE", "SIE.DE", "ENR.DE"],
-    "S&P 500 🇺🇸": ["AAPL", "MSFT", "AMZN", "GOOGL", "META", "V"],
-    "Nasdaq 🚀": ["NVDA", "TSLA", "AVGO", "COST", "NFLX", "ASML", "AMD"]
+    "S&P 500 🇺🇸": ["AAPL", "MSFT", "AMZN", "GOOGL", "META"],
+    "Nasdaq 🚀": ["NVDA", "TSLA", "AVGO", "COST", "NFLX"]
 }
 INDEX_TICKERS = {"DAX 🇩🇪": "^GDAXI", "S&P 500 🇺🇸": "^GSPC", "Nasdaq 🚀": "^IXIC"}
 
@@ -41,7 +43,10 @@ def calc_hps(ticker, vix, idx_p):
         r_ok = r_now > 0 and (r_now + r_pre) > -0.1; score += 30 if r_ok else 0
         sm = (p - lo) / (hi - lo) if hi != lo else 0.5
         s_ok = sm > 0.72; score += 30 if s_ok else 0
-        t_ok = not ((now.hour == 11 and now.minute >= 30) or (now.hour == 12) or (now.hour == 13 and now.minute < 30))
+        
+        # Timing (Mittagspause 11:30-13:30 CET)
+        is_lunch = (now.hour == 11 and now.minute >= 30) or (now.hour == 12) or (now.hour == 13 and now.minute < 30)
+        t_ok = not is_lunch
         score += 20 if t_ok else 0
         
         icons = f"VIX:{'✅' if v_ok else '⚠️'} | RSX:{'🔥' if r_ok else '❄️'} | SM:{'💎' if s_ok else '➖'} | T:{'🕒' if t_ok else '⏳'}"
@@ -49,7 +54,7 @@ def calc_hps(ticker, vix, idx_p):
     except: return 0, 0, ""
 
 # --- UI ---
-st.title("⚡ SNIPER V9.9 SORTED")
+st.title("⚡ SNIPER V9.9 ELITE")
 
 with st.sidebar:
     st.header("⚙️ Setup")
@@ -57,6 +62,8 @@ with st.sidebar:
     if st.button("Save"): st.session_state.capital = float(c_in)
     m_sel = st.selectbox("Markt", list(WATCHLISTS.keys()))
     st.metric("Budget", f"{st.session_state.capital:,.2f} €")
+    st.divider()
+    st.caption(f"Operator: {USER_NAME}")
 
 if st.button(f"🔍 SCAN {m_sel}", use_container_width=True):
     try:
@@ -71,7 +78,6 @@ if st.button(f"🔍 SCAN {m_sel}", use_container_width=True):
             sc, pr, ico = calc_hps(t, v_val, i_perf)
             if sc > 0: res.append({"t": t, "s": sc, "p": pr, "i": ico})
         
-        # Sortierung
         res = sorted(res, key=lambda x: x['s'], reverse=True)
         
         for item in res:
@@ -84,7 +90,7 @@ if st.button(f"🔍 SCAN {m_sel}", use_container_width=True):
                 with col2:
                     st.metric("Score", f"{item['s']}%")
                 st.write(item['i'])
-    except: st.error("Fehler beim Datenabruf. Bitte erneut versuchen.")
+    except: st.error("Fehler beim Datenabruf.")
 
 st.divider()
-st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Rank-Mode")
+st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} CET | Operator: {USER_NAME} | V9.9")
