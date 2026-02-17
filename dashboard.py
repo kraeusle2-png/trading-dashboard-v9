@@ -5,13 +5,12 @@ from datetime import datetime
 import pytz
 
 # --- SETUP ---
-st.set_page_config(page_title="Sniper V10.24", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="Sniper V10.25", page_icon="🎯", layout="wide")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
 
 USER_NAME = "Kraus Markus"
 
-# Speicher initialisieren
 if 'signal_log' not in st.session_state:
     st.session_state.signal_log = {}
 if 'golden_window' not in st.session_state:
@@ -62,47 +61,38 @@ def calc_pro_entry(ticker, vix, idx_p, markt):
         
         entry, sl = hi * 1.001, lo * 0.995
         tp = entry + ((entry - sl) * 2)
-        sl_status = "STOP LOSS OK" if p > sl else "STOP LOSS ERREICHT"
+        sl_hit = f"🛑 STOP LOSS ERREICHT" if p <= sl else "🛡️ SL OK"
         
-        return {"score": score, "price": p, "entry": entry, "sl": sl, "tp": tp, "checks": checks, "t": ticker, "sl_status": sl_status}
+        return {"score": score, "price": p, "entry": entry, "sl": sl, "tp": tp, "checks": checks, "t": ticker, "sl_status": sl_hit}
     except: return None
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("🎯 Dashboard")
     m_sel = st.selectbox("Markt wählen", list(WATCHLISTS.keys()))
-    
     st.divider()
     st.subheader("📊 Signal-Log")
-    if not st.session_state.signal_log:
-        st.write("Warte auf Signale...")
-    else:
-        for t, data in st.session_state.signal_log.items():
-            with st.expander(f"{ASSET_NAMES.get(t, t)} ({data['time']})"):
-                st.write(f"🟢 **Kauf:** {data['price']:.2f}€")
-                if data.get("exit_triggered"):
-                    st.write(f"🟠 **Verkauf:** {data['exit_time']} (@ {data['exit_price']:.2f}€)")
-
+    for t, data in st.session_state.signal_log.items():
+        with st.expander(f"{ASSET_NAMES.get(t, t)} ({data['time']})"):
+            st.write(f"🟢 **Kauf:** {data['price']:.2f}€")
+            if data.get("exit_triggered"):
+                st.write(f"🟠 **Verkauf:** {data['exit_time']} (@ {data['exit_price']:.2f}€)")
     if st.button("♻️ Reset"):
         st.session_state.signal_log = {}
         st.session_state.golden_window = {}
         st.rerun()
 
 # --- MAIN UI ---
-st.title("🎯 SNIPER PRO MONITOR V10.24")
+st.title("🎯 SNIPER PRO MONITOR V10.25")
 
-# --- 1. GOLDEN WINDOW (WIEDER DA!) ---
+# --- 1. GOLDEN WINDOW ---
 if st.session_state.golden_window:
     with st.container(border=True):
         st.subheader("⭐ Golden Window Treffer (09:30 - 09:45)")
         g_cols = st.columns(len(st.session_state.golden_window))
         for idx, (t, g) in enumerate(st.session_state.golden_window.items()):
             perf = ((g['current_price'] / g['entry_price']) - 1) * 100
-            with g_cols[idx]:
-                st.info(f"**{ASSET_NAMES.get(t, t)}**\n\n"
-                        f"Einstieg: {g['time']} (@ {g['entry_price']:.2f}€)\n\n"
-                        f"**Aktuell: {g['current_price']:.2f}€** ({perf:+.2f}%)\n\n"
-                        f"Letzter Check: {g['last_update']}")
+            g_cols[idx].info(f"**{ASSET_NAMES.get(t, t)}**\n\nSignal: {g['time']} (@ {g['entry_price']:.2f}€)\n\n**Aktuell: {g['current_price']:.2f}€** ({perf:+.2f}%)")
 st.divider()
 
 # --- 2. ANALYSE ---
@@ -119,39 +109,37 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
     for t in WATCHLISTS[m_sel]:
         data = calc_pro_entry(t, v_val, i_perf, m_sel)
         if data:
-            # Golden Window Logik (Speichern & Updaten)
-            if is_golden_time and data['score'] >= 80:
-                if t not in st.session_state.golden_window:
-                    st.session_state.golden_window[t] = {
-                        "time": current_time_str, "entry_price": data['price'], 
-                        "current_price": data['price'], "last_update": current_time_str
-                    }
+            if is_golden_time and data['score'] >= 80 and t not in st.session_state.golden_window:
+                st.session_state.golden_window[t] = {"time": current_time_str, "entry_price": data['price'], "current_price": data['price']}
             if t in st.session_state.golden_window:
-                st.session_state.golden_window[t].update({"current_price": data['price'], "last_update": current_time_str})
+                st.session_state.golden_window[t].update({"current_price": data['price']})
             
-            # Normales Log
             if data['score'] >= 80 and t not in st.session_state.signal_log:
                 st.session_state.signal_log[t] = {"time": current_time_str, "price": data['price'], "exit_triggered": False}
             if t in st.session_state.signal_log and data['score'] < 80 and not st.session_state.signal_log[t].get("exit_triggered"):
                 st.session_state.signal_log[t].update({"exit_time": current_time_str, "exit_price": data['price'], "exit_triggered": True})
-            
             res.append(data)
 
-    # Assets Rendern
     for item in sorted(res, key=lambda x: x['score'], reverse=True):
         with st.container(border=True):
-            col_head1, col_head2 = st.columns([3, 1])
-            col_head1.subheader(ASSET_NAMES.get(item['t'], item['t']))
-            col_head2.metric("Score", f"{item['score']}%")
+            h1, h2 = st.columns([3, 1])
+            h1.subheader(ASSET_NAMES.get(item['t'], item['t']))
+            h2.metric("Score", f"{item['score']}%")
             
-            # Stop Loss Status & Wert
+            # Einstieg & Aktueller Kurs (Wieder da!)
+            sig = st.session_state.signal_log.get(item['t'])
+            if sig:
+                st.write(f"🔔 **Signal:** {sig['time']} Uhr (Einstieg: {sig['price']:.2f}€) | **Aktuell: {item['price']:.2f}€**")
+                if sig.get("exit_triggered"):
+                    st.warning(f"⚠️ Verkaufssignal: {sig['exit_time']} (@ {sig['exit_price']:.2f}€)")
+
+            # Stop Loss & Trading Plan (Original Design)
             if "ERREICHT" in item['sl_status']:
-                st.error(f"🛑 {item['sl_status']}")
+                st.error(item['sl_status'])
             else:
-                st.success(f"🛡️ {item['sl_status']}")
+                st.success(item['sl_status'])
             
-            st.info(f"**Trading-Plan:** Entry {item['entry']:.2f}€ | SL: **{item['sl']:.2f}€** | Ziel: {item['tp']:.2f}€")
-            st.write(f"💹 Aktueller Kurs: **{item['price']:.2f} €**")
+            st.info(f"Entry ab: {item['entry']:.2f}€ | **SL: {item['sl']:.2f}€** | Ziel: {item['tp']:.2f}€")
             
             # Kriterien
             ch = item['checks']
@@ -159,6 +147,6 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
             c1.write(f"{'✅' if ch['VIX'] else '❌'} VIX")
             c2.write(f"{'✅' if ch['RSX'] else '❌'} RSX")
             c3.write(f"{'✅' if ch['SM'] else '❌'} SM")
-            c4.write(f"{'✅' if ch['TIME'] else '❌'} ZEIT")
+            c4.write(f"{'✅' if ch['TIME'] else '❌'} Zeit")
 
-st.caption(f"V10.24 | {now.strftime('%H:%M:%S')} | Operator: {USER_NAME}")
+st.caption(f"Operator: {USER_NAME} | Scan: {now.strftime('%H:%M:%S')}")
