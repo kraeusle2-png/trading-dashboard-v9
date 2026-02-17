@@ -5,20 +5,15 @@ from datetime import datetime
 import pytz
 
 # --- SETUP ---
-st.set_page_config(page_title="Sniper V10.11", page_icon="🎯", layout="centered")
+st.set_page_config(page_title="Sniper V10.13", page_icon="🎯", layout="centered")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
 
 USER_NAME = "Kraus Markus"
 
-# Speicher initialisieren
+# Speicher für Signale initialisieren
 if 'signal_log' not in st.session_state:
     st.session_state.signal_log = {}
-
-# --- AUTO-CLEANER ---
-keys_to_delete = [k for k, v in st.session_state.signal_log.items() if isinstance(v, str)]
-for k in keys_to_delete:
-    del st.session_state.signal_log[k]
 
 # --- ASSETS & WATCHLISTS ---
 ASSET_NAMES = {
@@ -71,17 +66,36 @@ def calc_pro_entry(ticker, vix, idx_p, markt):
         return {"score": score, "price": p, "entry": entry, "sl": sl, "tp": tp, "checks": checks, "t": ticker, "sl_status": sl_hit}
     except: return None
 
-# --- UI ---
-st.title("🎯 SNIPER V10.11")
-
+# --- SIDEBAR & DAILY LOG ---
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("🎯 Sniper Dashboard")
     m_sel = st.selectbox("Markt wählen", list(WATCHLISTS.keys()))
-    if st.button("♻️ Reset alle Signale"):
+    
+    st.divider()
+    
+    # NEU: Separater Bereich für das Signal-Log des Tages
+    st.subheader("📊 Signal-Log (Heute)")
+    if not st.session_state.signal_log:
+        st.write("Noch keine Signale heute.")
+    else:
+        for t, data in st.session_state.signal_log.items():
+            name = ASSET_NAMES.get(t, t)
+            with st.expander(f"{name} ({data['time']})"):
+                st.write(f"**Kauf:** {data['time']} @ {data['price']:.2f}€")
+                if data.get("exit_triggered"):
+                    st.write(f"**Verkauf:** {data['exit_time']} @ {data['exit_price']:.2f}€")
+                else:
+                    st.write("**Verkauf:** Offen/Halten")
+    
+    st.divider()
+    if st.button("♻️ Reset Tages-Daten"):
         st.session_state.signal_log = {}
         st.rerun()
-    st.divider()
+    
     st.caption(f"Operator: {USER_NAME}")
+
+# --- MAIN UI ---
+st.title(f"🎯 Sniper V10.13 Monitoring")
 
 if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
     vx_d = yf.download("^VIX", period="1d", progress=False)
@@ -97,9 +111,13 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
         if data:
             # Einstieg loggen (Score >= 80)
             if data['score'] >= 80 and t not in st.session_state.signal_log:
-                st.session_state.signal_log[t] = {"time": now.strftime("%H:%M"), "price": data['price'], "exit_triggered": False}
+                st.session_state.signal_log[t] = {
+                    "time": now.strftime("%H:%M"), 
+                    "price": data['price'], 
+                    "exit_triggered": False
+                }
             
-            # NEU: Exit-Logik (Wenn Score unter 80 fällt, nachdem ein Signal aktiv war)
+            # Verkauf loggen (Score < 80 nach Einstieg)
             if t in st.session_state.signal_log and data['score'] < 80:
                 if not st.session_state.signal_log[t].get("exit_triggered"):
                     st.session_state.signal_log[t]["exit_time"] = now.strftime("%H:%M")
@@ -119,29 +137,20 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
             with col2:
                 st.metric("Score", f"{item['score']}%")
             
-            # --- ANZEIGE EINSTIEG & VERKAUF ---
             sig_data = st.session_state.signal_log.get(item['t'], None)
-            
             m_col1, m_col2 = st.columns(2)
             
             if sig_data:
                 m_col1.write(f"🔔 **Einstieg:** {sig_data['time']} (@ {sig_data['price']:.2f} €)")
                 if sig_data.get("exit_triggered"):
-                    m_col2.markdown(f"⚠️ **Verkauf:** <span style='color:#FFA500; font-weight:bold;'>{sig_data['exit_time']} (@ {sig_data['exit_price']:.2f} €)</span>", unsafe_allow_html=True)
+                    m_col2.markdown(f"⚠️ **Verkauf:** <span style='color:orange; font-weight:bold;'>{sig_data['exit_time']}</span>", unsafe_allow_html=True)
                 else:
                     m_col2.write("⚠️ **Verkauf:** Halten")
-            else:
-                m_col1.write("🔔 **Einstieg:** Offen")
-                m_col2.write("⚠️ **Verkauf:** -")
-
-            # STOP LOSS STATUS
+            
             if "ERREICHT" in item['sl_status']:
                 st.error(f"🛑 **STOP LOSS:** {item['sl_status']}")
             
-            st.info(f"**Einstieg ab:** {item['entry']:.2f} € | **STOP:** {item['sl']:.2f} € | **ZIEL:** {item['tp']:.2f} €")
-            
-            ch = item['checks']
-            st.write(f"{'✅' if ch['VIX'] else '❌'} VIX | {'✅' if ch['RSX'] else '❌'} RSX | {'✅' if ch['SM'] else '❌'} SM | {'✅' if ch['TIME'] else '❌'} Zeit")
+            st.info(f"**Entry ab:** {item['entry']:.2f} € | **STOP:** {item['sl']:.2f} € | **ZIEL:** {item['tp']:.2f} €")
 
 st.divider()
-st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME} | V10.11 Exit-Control")
+st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | {USER_NAME}")
