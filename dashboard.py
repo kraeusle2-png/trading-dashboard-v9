@@ -5,11 +5,15 @@ from datetime import datetime
 import pytz
 
 # --- SETUP ---
-st.set_page_config(page_title="Sniper V10.4", page_icon="🎯", layout="centered")
+st.set_page_config(page_title="Sniper V10.5", page_icon="🎯", layout="centered")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
 
 USER_NAME = "Kraus Markus"
+
+# Initialisierung des ersten Signals (Session State)
+if 'first_alert_time' not in st.session_state:
+    st.session_state.first_alert_time = None
 
 ASSET_NAMES = {
     "SAP.DE": "SAP", "MUV2.DE": "Münchener Rück", "ALV.DE": "Allianz", "SIE.DE": "Siemens", "ENR.DE": "Siemens Energy",
@@ -31,7 +35,6 @@ def get_safe_val(dp):
     return float(dp.iloc[0]) if isinstance(dp, pd.Series) else float(dp)
 
 def get_timing_info(markt):
-    """Gibt das empfohlene Zeitfenster als Text zurück."""
     if "DAX" in markt:
         return "09:15-11:30 & 15:45-17:30"
     else:
@@ -50,10 +53,8 @@ def calc_pro_entry(ticker, vix, idx_p, markt):
     try:
         s = yf.download(ticker, period="2d", interval="15m", progress=False)
         if len(s) < 3: return None
-        
         p = get_safe_val(s['Close'].iloc[-1])
-        hi = get_safe_val(s['High'].iloc[-1])
-        lo = get_safe_val(s['Low'].iloc[-1])
+        hi, lo = get_safe_val(s['High'].iloc[-1]), get_safe_val(s['Low'].iloc[-1])
         prev_p = get_safe_val(s['Close'].iloc[-2])
         
         checks = {}
@@ -69,18 +70,14 @@ def calc_pro_entry(ticker, vix, idx_p, markt):
         checks['TIME'] = check_timing(markt)
         if checks['TIME']: score += 20
         
-        entry = hi * 1.001 
-        sl = lo * 0.995
+        entry, sl = hi * 1.001, lo * 0.995
         tp = entry + ((entry - sl) * 2)
         
-        return {
-            "score": score, "price": p, "entry": entry, "sl": sl, "tp": tp,
-            "checks": checks, "t": ticker
-        }
+        return {"score": score, "price": p, "entry": entry, "sl": sl, "tp": tp, "checks": checks, "t": ticker}
     except: return None
 
 # --- UI ---
-st.title("🎯 SNIPER V10.4 PRO")
+st.title("🎯 SNIPER V10.5")
 
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -88,6 +85,13 @@ with st.sidebar:
     if st.button("Speichern"): st.session_state.capital = float(c_in)
     m_sel = st.selectbox("Markt", list(WATCHLISTS.keys()))
     st.metric("Budget", f"{st.session_state.capital:,.2f} €")
+    
+    # Anzeige des ersten Signals in der Sidebar
+    st.divider()
+    if st.session_state.first_alert_time:
+        st.success(f"🚀 Erstes Signal heute:\n{st.session_state.first_alert_time}")
+    else:
+        st.info("Kein Signal bisher.")
     st.caption(f"Operator: {USER_NAME}")
 
 if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
@@ -96,22 +100,22 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
     ix_d = yf.download(INDEX_TICKERS[m_sel], period="2d", interval="15m", progress=False)
     i_perf = ((get_safe_val(ix_d['Close'].iloc[-1]) / get_safe_val(ix_d['Close'].iloc[-2])) - 1) * 100
     
-    st.info(f"Markt-Daten: VIX @ {v_val:.2f} | {m_sel} Index: {i_perf:+.2f}%")
+    st.info(f"VIX: {v_val:.2f} | {m_sel} Index: {i_perf:+.2f}%")
     
     res = []
     for t in WATCHLISTS[m_sel]:
         data = calc_pro_entry(t, v_val, i_perf, m_sel)
         if data and data['score'] > 0:
             res.append(data)
+            # LOGIK: Erstes Signal des Tages (Score >= 80) speichern
+            if data['score'] >= 80 and st.session_state.first_alert_time is None:
+                st.session_state.first_alert_time = now.strftime("%H:%M:%S")
     
     res = sorted(res, key=lambda x: x['score'], reverse=True)
-    
     zeit_fenster = get_timing_info(m_sel)
     
     for item in res:
-        risk_per_share = item['entry'] - item['sl']
-        qty = (st.session_state.capital * 0.01) / risk_per_share if risk_per_share > 0 else 0
-        
+        qty = (st.session_state.capital * 0.01) / (item['entry'] - item['sl'])
         with st.container(border=True):
             col1, col2 = st.columns([2, 1])
             with col1:
@@ -120,22 +124,18 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
             with col2:
                 st.metric("Score", f"{item['score']}%")
             
-            # Checkliste
             ch = item['checks']
-            st.write(f"{'✅' if ch['VIX'] else '❌'} VIX | {'✅' if ch['RSX'] else '❌'} RSX | {'✅' if ch['SM'] else '❌'} SmartMoney | {'✅' if ch['TIME'] else '❌'} Timing")
+            st.write(f"{'✅' if ch['VIX'] else '❌'} VIX | {'✅' if ch['RSX'] else '❌'} RSX | {'✅' if ch['SM'] else '❌'} SM | {'✅' if ch['TIME'] else '❌'} Zeit")
             
-            # NEU: Empfohlener Einstiegszeitpunkt
             if ch['TIME']:
-                st.success(f"🕒 **Einstieg empfohlen:** Jetzt (Fenster: {zeit_fenster})")
+                st.success(f"🕒 **Einstieg:** Jetzt (Fenster: {zeit_fenster})")
             else:
-                st.warning(f"🕒 **Warten bis:** {zeit_fenster}")
+                st.warning(f"🕒 **Fenster:** {zeit_fenster}")
             
-            # Trading Plan
             st.info(f"**ENTRY:** {item['entry']:.2f} € | **STÜCK:** {int(qty)}")
-            
-            col_a, col_b = st.columns(2)
-            col_a.error(f"Stop: {item['sl']:.2f} €")
-            col_b.success(f"Ziel: {item['tp']:.2f} €")
+            ca, cb = st.columns(2)
+            ca.error(f"Stop: {item['sl']:.2f} €")
+            cb.success(f"Ziel: {item['tp']:.2f} €")
 
 st.divider()
 st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME}")
