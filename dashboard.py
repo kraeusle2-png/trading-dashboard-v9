@@ -5,17 +5,17 @@ from datetime import datetime
 import pytz
 
 # --- SETUP ---
-st.set_page_config(page_title="Sniper V10.8.1", page_icon="🎯", layout="centered")
+st.set_page_config(page_title="Sniper V10.9", page_icon="🎯", layout="centered")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
 
 USER_NAME = "Kraus Markus"
 
-# Speicher für Signale (Asset -> {Zeit, Kurs})
+# Speicher initialisieren
 if 'signal_log' not in st.session_state:
     st.session_state.signal_log = {}
 
-# --- ASSETS & WATCHLISTS ---
+# --- ASSETS ---
 ASSET_NAMES = {
     "SAP.DE": "SAP", "MUV2.DE": "Münchener Rück", "ALV.DE": "Allianz", "SIE.DE": "Siemens", "ENR.DE": "Siemens Energy",
     "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "AMZN": "Amazon", "GOOGL": "Alphabet",
@@ -67,14 +67,17 @@ def calc_pro_entry(ticker, vix, idx_p, markt):
     except: return None
 
 # --- UI ---
-st.title("🎯 SNIPER V10.8.1")
+st.title("🎯 SNIPER V10.9")
 
 with st.sidebar:
     st.header("⚙️ Settings")
     m_sel = st.selectbox("Markt wählen", list(WATCHLISTS.keys()))
-    if st.button("Speicher zurücksetzen"):
+    
+    # Notfall-Reset Button
+    if st.button("♻️ Speicher bereinigen"):
         st.session_state.signal_log = {}
         st.rerun()
+        
     st.divider()
     st.caption(f"Operator: {USER_NAME}")
 
@@ -90,8 +93,12 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
     for t in WATCHLISTS[m_sel]:
         data = calc_pro_entry(t, v_val, i_perf, m_sel)
         if data:
-            if data['score'] >= 80 and t not in st.session_state.signal_log:
-                st.session_state.signal_log[t] = {"time": now.strftime("%H:%M"), "price": data['price']}
+            # Signal loggen (Neue Struktur: Dict)
+            if data['score'] >= 80:
+                # Nur speichern, wenn noch kein Eintrag da ist oder der alte Eintrag falsch (String) ist
+                current_entry = st.session_state.signal_log.get(t)
+                if current_entry is None or isinstance(current_entry, str):
+                     st.session_state.signal_log[t] = {"time": now.strftime("%H:%M"), "price": data['price']}
             res.append(data)
     
     res = sorted(res, key=lambda x: x['score'], reverse=True)
@@ -105,18 +112,23 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
             with col2:
                 st.metric("Score", f"{item['score']}%")
             
-            # REPARIERTE ANZEIGE-LOGIK
+            # --- ROBUSTE ANZEIGE-LOGIK (Fix für AttributeError) ---
             sig_data = st.session_state.signal_log.get(item['t'], None)
-            if sig_data:
-                # Nutzt .get() um Abstürze bei fehlenden Keys zu vermeiden
+            
+            if sig_data is None:
+                sig_display = "Offen"
+            elif isinstance(sig_data, dict):
+                # Neuer, korrekter Datentyp
                 s_time = sig_data.get('time', '--:--')
                 s_price = sig_data.get('price', 0.0)
                 sig_display = f"{s_time} Uhr (@ {s_price:.2f} €)"
             else:
-                sig_display = "Offen"
-            
+                # Alter Datentyp (String) aus V10.6 -> Fallback
+                sig_display = f"{sig_data} Uhr (Altdaten)"
+
             m_col1, m_col2 = st.columns(2)
             m_col1.write(f"🔔 **Signal:** {sig_display}")
+            
             if "ERREICHT" in item['sl_status']:
                 m_col2.markdown(f"🛑 **SL:** <span style='color:red; font-weight:bold;'>{item['sl_status']}</span>", unsafe_allow_html=True)
             else:
@@ -127,4 +139,4 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
             st.write(f"{'✅' if ch['VIX'] else '❌'} VIX | {'✅' if ch['RSX'] else '❌'} RSX | {'✅' if ch['SM'] else '❌'} SM | {'✅' if ch['TIME'] else '❌'} Zeit")
 
 st.divider()
-st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME}")
+st.caption(f"Letzter Scan: {now.strftime('%H:%M:%S')} | Operator: {USER_NAME} | V10.9 Fix")
