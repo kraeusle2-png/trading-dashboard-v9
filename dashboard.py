@@ -5,7 +5,7 @@ from datetime import datetime
 import pytz
 
 # --- SETUP ---
-st.set_page_config(page_title="Sniper V10.36", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="Sniper V10.37", page_icon="🎯", layout="wide")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
 
@@ -62,28 +62,39 @@ with st.sidebar:
         st.rerun()
 
 # --- MAIN UI ---
-st.title(f"🎯 SNIPER PRO MONITOR V10.36")
+st.title(f"🎯 SNIPER PRO MONITOR V10.37")
 
-# 1. GOLDEN WINDOW (Mit exakter Kurs- und Zeit-Anzeige)
+# 1. GOLDEN WINDOW (Optisch aufgewertet)
 if st.session_state.golden_window:
-    with st.container(border=True):
-        st.subheader(f"⭐ Golden Window Monitoring (Basis: {gw_start} Uhr)")
-        valid_gw = {k: v for k, v in st.session_state.golden_window.items() if 'curr' in v and 'entry' in v}
-        
-        if valid_gw:
-            g_cols = st.columns(len(valid_gw))
-            for idx, (t, g) in enumerate(valid_gw.items()):
-                perf = ((g['curr'] / g['entry']) - 1) * 100
-                with g_cols[idx]:
-                    st.markdown(f"### {ASSET_NAMES.get(t, t)}")
-                    if 'hps_hist' in g:
-                        hist_text = "".join([f"`{time_l}: {s_v}%`  \n" for time_l, s_v in g['hps_hist'].items()])
-                        st.info(hist_text)
+    st.subheader(f"⭐ Golden Window Monitoring (Basis: {gw_start} Uhr)")
+    valid_gw = {k: v for k, v in st.session_state.golden_window.items() if 'curr' in v and 'entry' in v}
+    
+    if valid_gw:
+        # Erhöht die Anzahl der Spalten für ein flacheres Design
+        g_cols = st.columns(len(valid_gw))
+        for idx, (t, g) in enumerate(valid_gw.items()):
+            perf = ((g['curr'] / g['entry']) - 1) * 100
+            color = "green" if perf >= 0 else "red"
+            
+            with g_cols[idx]:
+                with st.container(border=True):
+                    st.markdown(f"<h3 style='text-align: center; margin-bottom: 0;'>{ASSET_NAMES.get(t, t)}</h3>", unsafe_allow_html=True)
                     
-                    st.write(f"📌 In ({gw_start}): **{g['entry']:.2f}€**")
-                    st.write(f"🕒 Aktuell ({g['update_time']}):")
-                    st.subheader(f"{g['curr']:.2f}€")
-                    st.metric("Performance", f"{perf:+.2f}%")
+                    # Momentum Anzeige klein und sauber
+                    if 'hps_hist' in g:
+                        hist_items = [f"{time_l}: {s_v}%" for time_l, s_v in g['hps_hist'].items()]
+                        st.caption("Momentum: " + " | ".join(hist_items))
+                    
+                    st.divider()
+                    
+                    # Kurse in Spalten innerhalb der Karte
+                    ic1, ic2 = st.columns(2)
+                    ic1.markdown(f"<small>In ({gw_start})</small><br><b>{g['entry']:.2f}€</b>", unsafe_allow_html=True)
+                    ic2.markdown(f"<small>Aktuell ({g['update_time']})</small><br><b>{g['curr']:.2f}€</b>", unsafe_allow_html=True)
+                    
+                    # Performance als fetter Badge
+                    st.markdown(f"<div style='background-color: {color}; color: white; border-radius: 5px; text-align: center; padding: 5px; margin-top: 10px; font-weight: bold; font-size: 1.2em;'>{perf:+.2f}%</div>", unsafe_allow_html=True)
+
 st.divider()
 
 # 2. ANALYSE BUTTON
@@ -94,7 +105,6 @@ if st.button(f"🔍 {m_sel} ANALYSE STARTEN", use_container_width=True):
         ix_d = yf.download(INDEX_TICKERS[m_sel], period="2d", interval="5m", progress=False)
         i_perf = ((get_safe_val(ix_d['Close'].iloc[-1]) / get_safe_val(ix_d['Close'].iloc[-2])) - 1) * 100
         
-        # Sekundengenaue Zeit für das aktuelle Update
         update_time_str = datetime.now(cet).strftime("%H:%M:%S")
         temp_results = []
 
@@ -107,7 +117,6 @@ if st.button(f"🔍 {m_sel} ANALYSE STARTEN", use_container_width=True):
                 hi, lo = get_safe_val(s['High'].iloc[-1]), get_safe_val(s['Low'].iloc[-1])
                 prev_p = get_safe_val(s['Close'].iloc[-2])
                 
-                # Momentum & Golden Window Logik
                 h_window = s.between_time(pre_times[0], gw_start)
                 hps_history = {}
                 entry_price_gw = None
@@ -121,7 +130,6 @@ if st.button(f"🔍 {m_sel} ANALYSE STARTEN", use_container_width=True):
                             hps_history[t_label] = s_h
                             if t_label == gw_start: entry_price_gw = p_h
 
-                # Golden Window Update
                 if entry_price_gw:
                     st.session_state.golden_window[t] = {
                         "entry": entry_price_gw, 
@@ -132,7 +140,6 @@ if st.button(f"🔍 {m_sel} ANALYSE STARTEN", use_container_width=True):
                 elif t in st.session_state.golden_window:
                     st.session_state.golden_window[t].update({"curr": p_now, "update_time": update_time_str})
 
-                # Analyse Resultate (Live Liste)
                 score_now = calc_hps_score(p_now, prev_p, hi, lo, v_val, i_perf, True)
                 temp_results.append({
                     "t": t, "name": ASSET_NAMES.get(t, t), "score": score_now, "price": p_now, 
@@ -153,4 +160,4 @@ for item in sorted(st.session_state.current_results, key=lambda x: x['score'], r
         if item['status'] == "STOP": st.error("🛑 STOP LOSS")
         else: st.success("🛡️ OK")
 
-st.caption(f"V10.36 | {USER_NAME} | {datetime.now(cet).strftime('%H:%M:%S')}")
+st.caption(f"V10.37 | {USER_NAME} | {datetime.now(cet).strftime('%H:%M:%S')}")
