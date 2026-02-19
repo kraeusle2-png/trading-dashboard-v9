@@ -5,7 +5,7 @@ from datetime import datetime
 import pytz
 
 # --- SETUP ---
-st.set_page_config(page_title="Sniper V10.32", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="Sniper V10.33", page_icon="🎯", layout="wide")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
 
@@ -59,28 +59,36 @@ with st.sidebar:
     st.caption(f"Operator: {USER_NAME}")
 
 # --- MAIN UI ---
-st.title("🎯 SNIPER PRO MONITOR V10.32")
+st.title("🎯 SNIPER PRO MONITOR V10.33")
 
-# 1. GOLDEN WINDOW (HPS Historie 09:15 - 09:30)
+# 1. GOLDEN WINDOW
 if st.session_state.golden_window:
     with st.container(border=True):
         st.subheader("⭐ Golden Window & Momentum Tracker")
-        g_cols = st.columns(len(st.session_state.golden_window))
-        for idx, (t, g) in enumerate(st.session_state.golden_window.items()):
-            perf = ((g['curr'] / g['entry']) - 1) * 100
-            with g_cols[idx]:
-                st.markdown(f"**{ASSET_NAMES.get(t, t)}**")
-                hist_text = ""
-                for time_label, s_val in g['hps_hist'].items():
-                    hist_text += f"`{time_label}: {s_val}%`  \n"
-                st.info(hist_text)
-                st.write(f"In: {g['entry']:.2f}€ | **Aktuell: {g['curr']:.2f}€**")
-                st.metric("Performance", f"{perf:+.2f}%")
+        # Filtern, um nur Einträge mit korrekten Keys anzuzeigen
+        valid_gw = {k: v for k, v in st.session_state.golden_window.items() if 'curr' in v and 'entry' in v}
+        
+        if valid_gw:
+            g_cols = st.columns(len(valid_gw))
+            for idx, (t, g) in enumerate(valid_gw.items()):
+                perf = ((g['curr'] / g['entry']) - 1) * 100
+                with g_cols[idx]:
+                    st.markdown(f"**{ASSET_NAMES.get(t, t)}**")
+                    if 'hps_hist' in g:
+                        hist_text = ""
+                        for time_label, s_val in g['hps_hist'].items():
+                            hist_text += f"`{time_label}: {s_val}%`  \n"
+                        st.info(hist_text)
+                    st.write(f"In: {g['entry']:.2f}€ | **Aktuell: {g['curr']:.2f}€**")
+                    st.metric("Performance", f"{perf:+.2f}%")
+        else:
+            st.write("Warte auf Golden Window Signale (09:30)...")
+
 st.divider()
 
 # 2. ANALYSE BUTTON
 if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
-    with st.spinner("Lade Daten..."):
+    with st.spinner("Lade Marktdaten..."):
         vx_d = yf.download("^VIX", period="1d", progress=False)
         v_val = get_safe_val(vx_d['Close'].iloc[-1])
         ix_d = yf.download(INDEX_TICKERS[m_sel], period="2d", interval="5m", progress=False)
@@ -111,15 +119,21 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
                         t_label = timestamp.strftime('%H:%M')
                         if t_label in ['09:15', '09:20', '09:25', '09:30']:
                             p_h = get_safe_val(row['Close'])
+                            # Score für den historischen Zeitpunkt
                             s_h = calc_hps_score(p_h, prev_p, hi, lo, v_val, i_perf, (t_label == '09:30'))
                             hps_history[t_label] = s_h
                             if t_label == '09:30': entry_930 = p_h
 
-                # Golden Window Update
+                # Golden Window Update (Sicherstellen, dass alle Keys da sind)
                 if '09:30' in hps_history:
-                    if t not in st.session_state.golden_window:
-                        st.session_state.golden_window[t] = {"time": "09:30", "entry": entry_930, "curr": p_now, "hps_hist": hps_history}
+                    st.session_state.golden_window[t] = {
+                        "time": "09:30", 
+                        "entry": entry_930, 
+                        "curr": p_now, 
+                        "hps_hist": hps_history
+                    }
                 
+                # Falls Asset schon im GW ist, Kurs updaten
                 if t in st.session_state.golden_window:
                     st.session_state.golden_window[t]["curr"] = p_now
 
@@ -130,26 +144,30 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
                     "t": t, "name": ASSET_NAMES.get(t, t), "score": score_now, "price": p_now, 
                     "sl": sl, "tp": p_now + (p_now-sl)*2, "status": "OK" if p_now > sl else "STOP"
                 })
-            except: continue
+            except Exception as e:
+                continue
         
         st.session_state.current_results = temp_results
         st.rerun()
 
 # 3. ANZEIGE DER ERGEBNISSE
-for item in sorted(st.session_state.current_results, key=lambda x: x['score'], reverse=True):
-    with st.container(border=True):
-        c1, c2 = st.columns([3, 1])
-        c1.subheader(item['name'])
-        c2.metric("HPS Score", f"{item['score']}%")
-        
-        st.write(f"🔔 **Signal:** 09:30 Uhr (Einstieg via GW) | **Aktuell: {item['price']:.2f} €**")
-        
-        if item['status'] == "STOP":
-            st.error(f"🛑 STOP LOSS ERREICHT")
-        else:
-            st.success(f"🛡️ STOP LOSS OK")
+if st.session_state.current_results:
+    for item in sorted(st.session_state.current_results, key=lambda x: x['score'], reverse=True):
+        with st.container(border=True):
+            c1, c2 = st.columns([3, 1])
+            c1.subheader(item['name'])
+            c2.metric("Score", f"{item['score']}%")
             
-        st.info(f"**Plan:** SL: **{item['sl']:.2f} €** | Ziel: {item['tp']:.2f} €")
-        st.write("✅ VIX | ✅ RSX | ✅ SM | ✅ ZEIT")
+            st.write(f"🔔 **Signal:** 09:30 Uhr | **Aktuell: {item['price']:.2f} €**")
+            
+            if item['status'] == "STOP":
+                st.error(f"🛑 STOP LOSS ERREICHT")
+            else:
+                st.success(f"🛡️ STOP LOSS OK")
+                
+            st.info(f"**Plan:** SL: **{item['sl']:.2f} €** | Ziel: {item['tp']:.2f} €")
+            st.write("✅ VIX | ✅ RSX | ✅ SM | ✅ ZEIT")
+else:
+    st.info("Bitte auf 'Analyse starten' klicken.")
 
-st.caption(f"V10.32 | {now.strftime('%H:%M:%S')} | {USER_NAME}")
+st.caption(f"V10.33 | {now.strftime('%H:%M:%S')} | {USER_NAME}")
