@@ -5,7 +5,7 @@ from datetime import datetime
 import pytz
 
 # --- SETUP ---
-st.set_page_config(page_title="Sniper V10.33", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="Sniper V10.34", page_icon="🎯", layout="wide")
 cet = pytz.timezone('Europe/Berlin')
 now = datetime.now(cet)
 
@@ -50,22 +50,28 @@ def calc_hps_score(price, prev_price, hi, lo, vix, idx_p, is_market_time):
 with st.sidebar:
     st.header("🎯 Sniper Dashboard")
     m_sel = st.selectbox("Markt wählen", list(WATCHLISTS.keys()))
+    
+    # Dynamische Zeit-Definitionen basierend auf Marktwahl
+    if "DAX" in m_sel:
+        gw_start, gw_end = "09:30", "09:45"
+        pre_times = ['09:15', '09:20', '09:25', '09:30']
+    else: # US Märkte
+        gw_start, gw_end = "15:30", "15:45"
+        pre_times = ['15:15', '15:20', '15:25', '15:30']
+        
     st.divider()
     if st.button("♻️ Reset"):
-        st.session_state.signal_log = {}
-        st.session_state.golden_window = {}
-        st.session_state.current_results = []
+        st.session_state.signal_log, st.session_state.golden_window, st.session_state.current_results = {}, {}, []
         st.rerun()
     st.caption(f"Operator: {USER_NAME}")
 
 # --- MAIN UI ---
-st.title("🎯 SNIPER PRO MONITOR V10.33")
+st.title(f"🎯 SNIPER PRO MONITOR V10.34")
 
-# 1. GOLDEN WINDOW
+# 1. GOLDEN WINDOW & MOMENTUM TRACKER
 if st.session_state.golden_window:
     with st.container(border=True):
-        st.subheader("⭐ Golden Window & Momentum Tracker")
-        # Filtern, um nur Einträge mit korrekten Keys anzuzeigen
+        st.subheader(f"⭐ Golden Window & Momentum Tracker ({gw_start} - {gw_end})")
         valid_gw = {k: v for k, v in st.session_state.golden_window.items() if 'curr' in v and 'entry' in v}
         
         if valid_gw:
@@ -75,20 +81,15 @@ if st.session_state.golden_window:
                 with g_cols[idx]:
                     st.markdown(f"**{ASSET_NAMES.get(t, t)}**")
                     if 'hps_hist' in g:
-                        hist_text = ""
-                        for time_label, s_val in g['hps_hist'].items():
-                            hist_text += f"`{time_label}: {s_val}%`  \n"
+                        hist_text = "".join([f"`{time_l}: {s_v}%`  \n" for time_l, s_v in g['hps_hist'].items()])
                         st.info(hist_text)
                     st.write(f"In: {g['entry']:.2f}€ | **Aktuell: {g['curr']:.2f}€**")
                     st.metric("Performance", f"{perf:+.2f}%")
-        else:
-            st.write("Warte auf Golden Window Signale (09:30)...")
-
 st.divider()
 
 # 2. ANALYSE BUTTON
-if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
-    with st.spinner("Lade Marktdaten..."):
+if st.button(f"🔍 {m_sel} ANALYSE STARTEN", use_container_width=True):
+    with st.spinner(f"Scanne {m_sel} Watchlist..."):
         vx_d = yf.download("^VIX", period="1d", progress=False)
         v_val = get_safe_val(vx_d['Close'].iloc[-1])
         ix_d = yf.download(INDEX_TICKERS[m_sel], period="2d", interval="5m", progress=False)
@@ -106,46 +107,44 @@ if st.button(f"🔍 ANALYSE STARTEN", use_container_width=True):
                 hi, lo = get_safe_val(s['High'].iloc[-1]), get_safe_val(s['Low'].iloc[-1])
                 prev_p = get_safe_val(s['Close'].iloc[-2])
                 
+                # Marktzeiten-Check
                 zf = now.hour + now.minute / 60.0
-                is_market = (9.25 <= zf <= 11.5) or (15.75 <= zf <= 17.5) if "DAX" in m_sel else (15.75 <= zf <= 21.0)
+                if "DAX" in m_sel:
+                    is_market = (9.25 <= zf <= 11.5) or (15.75 <= zf <= 17.5)
+                else:
+                    is_market = (15.25 <= zf <= 21.0) # Wall Street Core Hours
                 
-                # Momentum-Analyse (Historie 09:15-09:30)
-                h_window = s.between_time('09:15', '09:30')
+                # Dynamische Momentum-Analyse
+                h_window = s.between_time(pre_times[0], gw_start)
                 hps_history = {}
-                entry_930 = p_now
+                entry_price_gw = p_now
                 
                 if not h_window.empty:
                     for timestamp, row in h_window.iterrows():
                         t_label = timestamp.strftime('%H:%M')
-                        if t_label in ['09:15', '09:20', '09:25', '09:30']:
+                        if t_label in pre_times:
                             p_h = get_safe_val(row['Close'])
-                            # Score für den historischen Zeitpunkt
-                            s_h = calc_hps_score(p_h, prev_p, hi, lo, v_val, i_perf, (t_label == '09:30'))
+                            s_h = calc_hps_score(p_h, prev_p, hi, lo, v_val, i_perf, (t_label == gw_start))
                             hps_history[t_label] = s_h
-                            if t_label == '09:30': entry_930 = p_h
+                            if t_label == gw_start: entry_price_gw = p_h
 
-                # Golden Window Update (Sicherstellen, dass alle Keys da sind)
-                if '09:30' in hps_history:
+                # Golden Window Logic
+                if gw_start in hps_history:
                     st.session_state.golden_window[t] = {
-                        "time": "09:30", 
-                        "entry": entry_930, 
-                        "curr": p_now, 
-                        "hps_hist": hps_history
+                        "time": gw_start, "entry": entry_price_gw, "curr": p_now, "hps_hist": hps_history
                     }
                 
-                # Falls Asset schon im GW ist, Kurs updaten
                 if t in st.session_state.golden_window:
                     st.session_state.golden_window[t]["curr"] = p_now
 
-                # Live Analyse Resultat
+                # Live Analyse
                 score_now = calc_hps_score(p_now, prev_p, hi, lo, v_val, i_perf, is_market)
                 sl = lo * 0.995
                 temp_results.append({
                     "t": t, "name": ASSET_NAMES.get(t, t), "score": score_now, "price": p_now, 
                     "sl": sl, "tp": p_now + (p_now-sl)*2, "status": "OK" if p_now > sl else "STOP"
                 })
-            except Exception as e:
-                continue
+            except: continue
         
         st.session_state.current_results = temp_results
         st.rerun()
@@ -156,9 +155,9 @@ if st.session_state.current_results:
         with st.container(border=True):
             c1, c2 = st.columns([3, 1])
             c1.subheader(item['name'])
-            c2.metric("Score", f"{item['score']}%")
+            c2.metric("HPS Score", f"{item['score']}%")
             
-            st.write(f"🔔 **Signal:** 09:30 Uhr | **Aktuell: {item['price']:.2f} €**")
+            st.write(f"🔔 **Signal:** {gw_start} Uhr | **Aktuell: {item['price']:.2f} €**")
             
             if item['status'] == "STOP":
                 st.error(f"🛑 STOP LOSS ERREICHT")
@@ -167,7 +166,5 @@ if st.session_state.current_results:
                 
             st.info(f"**Plan:** SL: **{item['sl']:.2f} €** | Ziel: {item['tp']:.2f} €")
             st.write("✅ VIX | ✅ RSX | ✅ SM | ✅ ZEIT")
-else:
-    st.info("Bitte auf 'Analyse starten' klicken.")
 
-st.caption(f"V10.33 | {now.strftime('%H:%M:%S')} | {USER_NAME}")
+st.caption(f"V10.34 | {now.strftime('%H:%M:%S')} | {USER_NAME}")
